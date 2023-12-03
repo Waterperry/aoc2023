@@ -1,29 +1,32 @@
 def _initial_solution(part: int = 1) -> None:
+    words: list[str] = []
     if part == 2:
-        words: list[str] = [
-            "ZERO",
-            "one",
-            "two",
-            "three",
-            "four",
-            "five",
-            "six",
-            "seven",
-            "eight",
-            "nine",
-            "0",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "7",
-            "8",
-            "9",
-        ]
+        words.extend(
+            [
+                "ZERO",
+                "one",
+                "two",
+                "three",
+                "four",
+                "five",
+                "six",
+                "seven",
+                "eight",
+                "nine",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+            ]
+        )
     else:
-        words: list[str] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        words.extend(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
 
     def get_all_indexes(haystack: str, needle: str) -> list[tuple[str, int]]:
         lfind: int = haystack.find(needle)

@@ -1,25 +1,29 @@
 #include <iostream>
-#include <vector>
 #include <vector_ops.cu>
 
 #define MAX_LINE_LENGTH 100
 #define MAX_NUM_LINES 1005
 
 #define NUM_WORDS 20
-#define WORD_BLOCK_LENGTH 6
 #define NUM_BLOCKS 8
 #define NUM_THREADS 128
 
 using namespace std;
 
 const char *TARGET_FILE = "../../inputs/day1/part1";
-const char *words = "ZERO__one___two___three_four__five__six___seven_eight_nine__0_____1_____2_____3_____4_____5_____6_____7_____8_____9_____";
+const char *words[] = {"ZERO", "one", "two", "three", "four", "five", "six", "seven",
+                       "eight", "nine", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
 
 typedef struct file_lines_ {
     const char **lines;
     int count;
 } FILE_LINES;
 
+/**
+ * Read a line from the given file pointer. Stop at a line break (\n, \r) or end of file.
+ * @param f file pointer
+ * @return pointer to heap mem containing one line from the file.
+ */
 __host__ char *get_line(FILE *f) {
     char buf[MAX_LINE_LENGTH] = {0};
     int c, ptr = 0;
@@ -41,6 +45,11 @@ __host__ char *get_line(FILE *f) {
     return rv;
 }
 
+/**
+ * Read a whole file's lines into a FILE_LINES struct
+ * @param filename filename to read in
+ * @return FILE_LINES struct containing line count and lines
+ */
 __host__ FILE_LINES read_in_file(const char *filename) {
     FILE *f = fopen(filename, "r");
 
@@ -78,7 +87,7 @@ __device__ void strlen(const char *word, int *out) {
     *out = i;
 }
 
-__device__ void cuda_strstr(const char *haystack, char *needle, const char **out) {
+__device__ void cuda_strstr(const char *haystack, const char *needle, const char **out) {
     int hs_len, ndl_len;
 
     strlen(haystack, &hs_len);
@@ -101,7 +110,7 @@ __device__ void cuda_strstr(const char *haystack, char *needle, const char **out
     *out = nullptr;
 }
 
-__device__ void cuda_last_strstr(const char *haystack, char *needle, const char **out) {
+__device__ void cuda_last_strstr(const char *haystack, const char *needle, const char **out) {
     int haystack_len, needle_len;
     strlen(haystack, &haystack_len);
     strlen(needle, &needle_len);
@@ -115,7 +124,7 @@ __device__ void cuda_last_strstr(const char *haystack, char *needle, const char 
     *out = idx_of_match;
 }
 
-__global__ void run(const char **inp, const char *device_words, int word_count, int *out) {
+__global__ void run(const char **inp, const char **device_words, int word_count, int *out) {
     int i = (int) (blockDim.x * blockIdx.x + threadIdx.x);
 
     if (i >= word_count) {
@@ -129,12 +138,7 @@ __global__ void run(const char **inp, const char *device_words, int word_count, 
     auto min_idx = -1, max_idx = -1;
 
     for (auto curr_idx = 0; curr_idx < NUM_WORDS; curr_idx++){
-        char word[WORD_BLOCK_LENGTH];
-        auto word_start = device_words + (WORD_BLOCK_LENGTH * curr_idx);
-        for(int idx = 0; idx < WORD_BLOCK_LENGTH; idx++) {
-            word[idx] = word_start[idx];
-            if (word[idx] == '_') word[idx] = '\0';
-        }
+        auto word = device_words[curr_idx];
 
         const char *first_idx, *last_idx;
         cuda_strstr(line, word, &first_idx);
@@ -190,36 +194,52 @@ __host__ void cuda_day1_main(int part) {
         exit(0);
     }
 
+    // size of buffer to store number for each line.
     auto mem_size = sizeof(int) * MAX_NUM_LINES;
 
-    char *device_words;
-    cudaMalloc(&device_words, sizeof(char) * (WORD_BLOCK_LENGTH * NUM_WORDS + 1));
-    cudaMemcpy(device_words, words, sizeof(char) * (WORD_BLOCK_LENGTH * NUM_WORDS + 1), cudaMemcpyHostToDevice);
-
-
-    char **lines_on_device = (char **) malloc(sizeof(char*) * MAX_NUM_LINES);
-    for (int i = 0; i < f.count; i++){
-        cudaMalloc(&lines_on_device[i], sizeof(char) * MAX_LINE_LENGTH);
-        cudaMemset(lines_on_device[i], 0, sizeof(char) * MAX_LINE_LENGTH);
-        cudaMemcpy(lines_on_device[i], f.lines[i], strlen(f.lines[i]), cudaMemcpyHostToDevice);
+    // keep a copy on host of pointers to words on device, so we can copy the words over.
+    char **device_word_pointers = (char **) malloc(sizeof(char*) * MAX_NUM_LINES);
+    for (auto i = 0; i < NUM_WORDS; i++) {
+        auto len_word = strlen(words[i]) + 1;
+        cudaMalloc(&device_word_pointers[i], sizeof(char) * len_word);
+        cudaMemcpy(device_word_pointers[i], words[i], len_word * sizeof(char), cudaMemcpyHostToDevice);
     }
 
+    // copy the pointers to the words over to the device
+    char **device_words;
+    cudaMalloc(&device_words, NUM_WORDS * sizeof(char*));
+    cudaMemcpy(device_words, device_word_pointers, NUM_WORDS * sizeof(char*), cudaMemcpyHostToDevice);
+
+    // keep a copy on host of pointers to each line, so that we can copy the lines over.
+    char **device_line_pointers = (char **) malloc(sizeof(char*) * MAX_NUM_LINES);
+    for (int i = 0; i < f.count; i++){
+        cudaMalloc(&device_line_pointers[i], sizeof(char) * MAX_LINE_LENGTH);
+        cudaMemset(device_line_pointers[i], 0, sizeof(char) * MAX_LINE_LENGTH);
+        cudaMemcpy(device_line_pointers[i], f.lines[i], strlen(f.lines[i]), cudaMemcpyHostToDevice);
+    }
+
+    // copy the pointers to the lines over to the device
     char **device_lines;
     cudaMalloc(&device_lines, f.count * sizeof(char**));
-    cudaMemcpy(device_lines, lines_on_device, f.count * sizeof(char**), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_lines, device_line_pointers, f.count * sizeof(char**), cudaMemcpyHostToDevice);
 
+    // allocate memory to store the number parsed from each line on device
     int *device_out;
-
     cudaMalloc(&device_out, mem_size);
     cudaMemset(device_out, 0, mem_size);
 
-    run<<<NUM_BLOCKS, NUM_THREADS>>>((const char **)device_lines, device_words, f.count, device_out);
+    // launch the kernel and ensure it succeeds
+    run<<<NUM_BLOCKS, NUM_THREADS>>>((const char **)device_lines, (const char **)device_words, f.count, device_out);
     checkpoint("post_kernel_run");
 
+    // allocate memory for the result of the parallel reduction
     int *device_final_sum;
     cudaMalloc(&device_final_sum, sizeof(int));
+
+    // launch the parallel reduction kernel
     vec_reduce_sum<<<NUM_BLOCKS, NUM_THREADS>>>(f.count, device_out, device_final_sum);
 
+    // copy the result back to host for printing
     int final_sum;
     cudaMemcpy(&final_sum, device_final_sum, sizeof(int), cudaMemcpyDeviceToHost);
     std::cout << final_sum << std::endl;
